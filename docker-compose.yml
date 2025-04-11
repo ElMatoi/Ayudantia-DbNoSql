@@ -1,0 +1,39 @@
+services:
+  mongo:
+    image: mongo:latest
+    container_name: mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - taller5
+  redis:
+    image: redis:latest
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - taller5
+  backend:
+    build:
+      context: ./backend
+      dockerfile: DockerFile
+    container_name: backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    networks:
+      - taller5
+    depends_on:
+      - mongo
+      - redis
+volumes:
+  mongo_data:
+  redis_data:
+networks:
+  taller5:
+    driver: bridge
