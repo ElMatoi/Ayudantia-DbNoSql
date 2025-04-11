@@ -28,8 +28,7 @@ docker-compose up --build
   "sensorId": "sensor-123",
   "value": 25.6,
   "unit": "C",
-  "timestamp": "2025-04-11T10:30:00"
-}```
+  "timestamp": "2025-04-11T10:30:00"}```
 - ##### volcar datos de redis a mongo
 - **URL**: `/volcarDatosRedisAMongo/`
 - **Método**: `Post`
