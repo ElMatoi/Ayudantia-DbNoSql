@@ -3,14 +3,18 @@ from pydantic import BaseModel
 from db import redis_client, mongo_collection
 import uuid
 import json
+from graph import endpoint as graph_router
 
 app = FastAPI()
+app.include_router(graph_router)
 
 class SensorMedicion(BaseModel):  # modelo de transferencia de datos (DTO) usando pydantic
     sensorId: str
     value: float
     unit: str
     timestamp: str
+
+
 
 @app.get("/getSensor/{sensor_id}") ## endpoint para obtener los dartos de un sensor en la cache --> http://localhost:8000/getSensor/sensor-123-fdc7a306-6bfc-4f69-aa8e-bd8e3046aae1 (clave guardada en redis)
 async def get_sensor_from_redis(sensor_id: str):
