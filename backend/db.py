@@ -1,14 +1,16 @@
-from pymongo import MongoClient
+from motor.motor_asyncio import AsyncIOMotorClient  
 import redis
 from neo4j import GraphDatabase
 
 
-mongo_client = MongoClient("mongodb://mongo:27017/") ## cliente para trabajar con mongo nombre y puertos declarados en el docker compose 
-mongo_db = mongo_client["sensor_db"]
-mongo_collection = mongo_db["sensores"]
+mongo_client = AsyncIOMotorClient("mongodb://mongo:27017/") 
+mongo_db = mongo_client["system_db"]
+users_collection = mongo_db["users"]
+products_collection = mongo_db["products"]
 
 
-redis_client = redis.Redis(host="redis", port=6379, decode_responses=True)##cliente para trabajar con redis, puertos y nombre declarados en el docker compose
+redis_client = redis.Redis(host="redis", port=6379, decode_responses=True)
+
 
 NEO4J_URI = "bolt://neo4j:7687"
 NEO4J_USER = "neo4j"

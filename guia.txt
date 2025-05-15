@@ -1,0 +1,1 @@
+https://alvarmaciel.gitlab.io/cyberiada/post/2021-12-29-crud-con-fastapi-mongodb-y-docker/

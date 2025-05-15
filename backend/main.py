@@ -1,89 +1,152 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, status, Query,status
 from pydantic import BaseModel
-from db import redis_client, mongo_collection
-import uuid
+from schemas.response import ResponseMessage, ErrorMessage
+from db import redis_client, users_collection, products_collection, neo4j_driver
 import json
-from graph import endpoint as graph_router
+from typing import List
+
+class UserSistem(BaseModel):
+   
+    name: str
+    lastName: str
+
+class ProducSistem(BaseModel):
+    
+    name: str
+    category: str
+
+class VistaProducto(BaseModel):
+    user_id: str
+    product_id: str
+    category_name: str
+
 
 app = FastAPI()
-app.include_router(graph_router)
 
-class SensorMedicion(BaseModel):  # modelo de transferencia de datos (DTO) usando pydantic
-    sensorId: str
-    value: float
-    unit: str
-    timestamp: str
+@app.post("/crearUsuario", status_code=status.HTTP_201_CREATED, response_model=ResponseMessage)
+async def agregar_usuario(datos_usuario: UserSistem) -> ResponseMessage:
+    try:
+       
+        usuario = await users_collection.insert_one(datos_usuario.dict())  
+        nuevo_usuario = await users_collection.find_one({"_id": usuario.inserted_id})  
+        return ResponseMessage[dict](
+            success=True,
+            message="user agregado ",
+            data=user_helper(nuevo_usuario)
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
+from fastapi import status, HTTPException
+import json
 
+@app.post("/crearProducto", status_code=status.HTTP_201_CREATED, response_model=ResponseMessage)
+async def agregar_producto(datos_producto: ProducSistem) -> ResponseMessage:
+    try:
+        producto = await products_collection.insert_one(datos_producto.dict())
+        nuevo_producto = await products_collection.find_one({"_id": producto.inserted_id})
+        product_id = str(nuevo_producto["_id"])
 
-@app.get("/getSensor/{sensor_id}") ## endpoint para obtener los dartos de un sensor en la cache --> http://localhost:8000/getSensor/sensor-123-fdc7a306-6bfc-4f69-aa8e-bd8e3046aae1 (clave guardada en redis)
-async def get_sensor_from_redis(sensor_id: str):
-    sensor_json = redis_client.get(f"medicion:{sensor_id}")
+        redis_client.set(product_id, json.dumps(product_helper(nuevo_producto)))
 
-    if sensor_json:
-        sensor_data = json.loads(sensor_json)
-        return {
-            "sensor_id": sensor_id,
-            "sensor_data": sensor_data
-        }
-    else:
-        return {"message": "Sensor no encontrado en la cache"}
-
-
-@app.post("/saveDataSensorInCache/") #ndpoint para guardar datos en la cache ->  http://localhost:8000/saveDataSensorInCache/
-async def saveDataSensorInCache(medicion: SensorMedicion):
-  
-    cache_id = f"{medicion.sensorId}-{str(uuid.uuid4())}"
-    
-   
-    sensor_json = {
-        "sensorId": medicion.sensorId,
-        "value": medicion.value,
-        "unit": medicion.unit,
-        "timestamp": medicion.timestamp
-    }
-
-   
-    redis_client.set(f"medicion:{cache_id}", json.dumps(sensor_json))
-
-    return {
-        "message": "Medición guardada en la cache",
-        "cache_id": cache_id,
-        "data": sensor_json
-    }
-
-@app.post("/volcarDatosRedisAMongo/")  # endpoint para mover los datos de la cache a mongo --> http://localhost:8000/volcarDatosRedisAMongo/
-async def flush_all_sensor_data_to_mongo():
-    all_sensor_keys = redis_client.keys("medicion:*")  
-    
-    if not all_sensor_keys:
-        raise HTTPException(status_code=404, detail="La cache esta vacia")
-
-    sensor_documents = []
-
-    for key in all_sensor_keys:
-        sensor_json = redis_client.get(key)
-        if sensor_json:
-            measurement_data = json.loads(sensor_json)
-            new_sensor_document = {
-                "sensorId": measurement_data["sensorId"],
-                "mediciones": [
-                    {
-                        "value": measurement_data["value"],
-                        "unit": measurement_data["unit"],
-                        "timestamp": measurement_data["timestamp"]
-                    }
-                ]
-            }
-            sensor_documents.append(new_sensor_document)
-            redis_client.delete(key)  
-
-    if sensor_documents:
-        result = mongo_collection.insert_many(sensor_documents)
-        return {
-            "message": f"{len(sensor_documents)} sensores insertados correctamente en MongoDB",
-            "mongo_ids": [str(doc_id) for doc_id in result.inserted_ids]
-        }
-    else:
-                return {"message": "hubo un error a traspasar a mongo"}
         
+        with neo4j_driver.session() as session:
+            session.run(
+                """
+                MERGE (p:Producto {id: $product_id, name: $name})
+                MERGE (c:Categoria {name: $category})
+                MERGE (p)-[:PERTENECE_A]->(c)
+                """,
+                product_id=product_id,
+                name=nuevo_producto["name"],
+                category=nuevo_producto["category"]
+            )
+
+        return ResponseMessage[dict](
+            success=True,
+            message="producto agregado ",
+            data=product_helper(nuevo_producto)
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+
+@app.post("/relacionVistaUserProducto", status_code=status.HTTP_201_CREATED, response_model=ResponseMessage)
+async def agregar_vista_producto(view_data: VistaProducto) -> ResponseMessage:
+    try:
+        with neo4j_driver.session() as session:
+            result = session.run(
+                """
+                MERGE (u:Usuario {id: $user_id})
+                MERGE (p:Producto {id: $product_id})
+                MERGE (c:Categoria {name: $category_name})
+                MERGE (u)-[:VIO]->(p)
+                MERGE (p)-[:PERTENECE_A]->(c)
+                """,
+                user_id=view_data.user_id, product_id=view_data.product_id, category_name=view_data.category_name
+            )
+            return ResponseMessage[dict](
+                success=True,
+                message="",
+                data={"user_id": view_data.user_id, "product_id": view_data.product_id, "category": view_data.category_name}
+            )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+
+@app.get("/recomendarProductos", status_code=status.HTTP_200_OK, response_model=ResponseMessage[List[dict]])
+async def recomendar_productos(user_id: str = Query(...)) -> ResponseMessage[List[dict]]:
+    try:
+        with neo4j_driver.session() as session:
+            result = session.run(
+                """
+                MATCH (u:Usuario {id: $user_id})-[:VIO]->(p:Producto)-[:PERTENECE_A]->(c:Categoria)
+                WITH u, c, collect(p) AS productos_vistos
+                MATCH (p2:Producto)-[:PERTENECE_A]->(c)
+                WHERE NOT (u)-[:VIO]->(p2)
+                RETURN p2.id AS producto_id, p2.name AS producto_name, c.name AS categoria
+                LIMIT 5
+                """,
+                user_id=user_id
+            )
+
+            recomendaciones = []
+            for record in result:
+                recomendaciones.append({
+                    "producto_id": record["producto_id"],
+                    "producto_name": record["producto_name"],
+                    "categoria": record["categoria"]
+                })
+
+            if not recomendaciones:
+                return ResponseMessage[List[dict]](
+                    success=False,
+                    message="",
+                    data=[]
+                )
+
+            return ResponseMessage[List[dict]](
+                success=True,
+                message="",
+                data=recomendaciones
+            )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+def user_helper(user: dict) -> dict:
+    return {
+        "id": str(user["_id"]),
+        "name": user["name"],
+        "lastName": user["lastName"]
+    }
+
+def product_helper(product: dict) -> dict:
+    return {
+        "id": str(product["_id"]),
+        "name": product["name"],
+        "category": product["category"]
+    }
+
